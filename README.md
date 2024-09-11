@@ -16,7 +16,7 @@ Our ultimate goal is to set up a server that behaves as a TV broadcast station. 
 complicated, so we'll be dealing with a heavily simplified version of the problem: our TV station will broadcast closed
 caption (CC) text data.
 
-![image](https://github.com/user-attachments/assets/bc75f1b2-a30b-4224-9b6f-edf08d5cd202)
+![image](https://github.com/user-attachments/assets/a9e26f37-faab-477e-9fa7-d5b9cecbf126)
 
 In Project2, you set up a TCP server to handle connections from multiple clients. Project3 will involve actually
 streaming the CC data (over UDP!).
