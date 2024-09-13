@@ -183,7 +183,7 @@ To help elucidate the above protocol, here's a visualization of the different me
 
 - Push your working code to the main branch of your team's GitHub Repository before the deadline
 - Edit the README to answer the above questions
-- On Canvas, *each* member of the group must individually upload answers to these questions:
+- On Teams, *each* member of the group must individually upload answers to these questions:
     - What did you (as an individual) contribute to this project?
     - What did the other members of your team contribute?
     - Do you have any concerns about your own performance or that of your team members? Any comments will remain
