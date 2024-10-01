@@ -168,6 +168,16 @@ To help elucidate the above protocol, here's a visualization of the different me
 - You might find a compiler-enforced state machine pattern
   helpful: [State machine pattern](https://hoverbear.org/blog/rust-state-machine-pattern/)
 
+## Student tips
+
+Prior students of this course have added the following feedback, which may aid your debugging process.
+
+- If you are having problems with the integration tests not fully killing everything listening on 8080, make sure you have lsof installed on your docker container that is running the tests. 
+    - Install with `apt install lsof`
+- If you have an error on Remote development on windows, try to update your RustRover and Docker. The update option is under help. Select Check for update.
+    - If there is still an issue, try this command in admin PowerShell. Resetting HNS might help: `netsh int ip reset`
+    - After that, restart your machine, and create a new dev container in your project remote development
+
 # Submission
 
 ## Questions
