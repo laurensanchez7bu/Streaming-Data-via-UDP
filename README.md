@@ -204,8 +204,8 @@ Prior students of this course have added the following feedback, which may aid y
 
 Below is a prior rubric, although it is subject to change.
 
-All my tests pass (9 tests)	10%
-Manual testing works as expected	45%
-Code quality	25%
-Documentation quality	10%
-Readme questions (5 questions)	10%
+- All my tests pass (9 tests)	10%
+- Manual testing works as expected	45%
+- Code quality	25%
+- Documentation quality	10%
+- Readme questions (5 questions)	10%
