@@ -16,7 +16,7 @@ Our ultimate goal is to set up a server that behaves as a TV broadcast station. 
 complicated, so we'll be dealing with a heavily simplified version of the problem: our TV station will broadcast closed
 caption (CC) text data.
 
-![image](https://github.com/user-attachments/assets/a9e26f37-faab-477e-9fa7-d5b9cecbf126)
+![image](366624465-a9e26f37-faab-477e-9fa7-d5b9cecbf126.png)
 
 In Project2, you set up a TCP server to handle connections from multiple clients. Project3 will involve actually
 streaming the CC data (over UDP!).
@@ -199,3 +199,13 @@ Prior students of this course have added the following feedback, which may aid y
     - Do you have any concerns about your own performance or that of your team members? Any comments will remain
       confidential, and Dr. Freeman will try to address them in a way that preserves anonymity.
     - After completing this project, what questions do you have about the material we've gone through so far?
+
+## Rubric
+
+Below is a prior rubric, although it is subject to change.
+
+All my tests pass (9 tests)	10%
+Manual testing works as expected	45%
+Code quality	25%
+Documentation quality	10%
+Readme questions (5 questions)	10%
