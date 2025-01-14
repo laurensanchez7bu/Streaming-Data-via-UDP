@@ -209,3 +209,5 @@ Below is a prior rubric, although it is subject to change.
 - Code quality	25%
 - Documentation quality	10%
 - Readme questions (5 questions)	10%
+
+Your individual grade will scale from here according to your participation level.
