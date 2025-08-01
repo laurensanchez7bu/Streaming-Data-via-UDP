@@ -184,10 +184,10 @@ Prior students of this course have added the following feedback, which may aid y
 
 - What's the difference between bind() and connect() for UDP?
 - Why might we call bind(0.0.0.0:0)?
-- According to the protocol, what is the maximum size of our UDP payload (in bytes)?
+- According to the protocol, what is the maximum size of our UDP payload (in bytes)? Hint: think about the fields' data representations
 - Within the bounds of the protocol, what is a way that we can communicate *longer* `sentence`s within a single UDP
   packet? Under your proposed scheme, what is the maximum character length of a `sentence`?
-- What will happen if one of the UDP messages is lost in transit?
+- If one of the UDP messages is lost in transit, what happens? How will the client receive that data, or be made aware that it was lost?
 
 ## What to submit
 
