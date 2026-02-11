@@ -3,6 +3,13 @@ use std::io::{BufRead, Seek};
 use std::{env, thread};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::net::UdpSocket;
+use tokio::sync::{Mutex, broadcast};
+use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
+use std::sync::{Arc, };
+
+type Channels = Arc<Mutex<HashMap<String, HashSet<SocketAddr>>>>;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -12,6 +19,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let addr = env::args()
         .nth(1)
         .unwrap_or_else(|| "127.0.0.1:8080".to_string());
+
+    let socket = UdpSocket::bind("127.0.0.1:5000").await?;
+    println!("UDP socket running on 127.0.0.1:5000");
+
+    let channels: Channels = Arc::new(Mutex::new(HashMap::new()));
+    let mut buf = [0u8; 1024];
+
 
     let listener = TcpListener::bind(&addr).await?;
     let addr = listener.local_addr()?;
