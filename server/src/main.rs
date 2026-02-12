@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     let channels = Arc::new(channels);
 
-    let subscriptions = Arc::new(Mutex::new(HashSet::<(SocketAddr, usize)>::new()));
+    let subscriptions = Arc::new(Mutex::new(HashMap::<SocketAddr, tokio::task::JoinHandle<()>>::new()));
 
     for channel_id in 0..NUM_CHANNELS {
         let tx = channels[channel_id].clone();
@@ -64,24 +64,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         let mut subs = subscriptions.lock().await;
 
-        if subs.contains(&(addr, channel_id)) {
-            continue;
+        if let Some(old_handle) = subs.remove(&addr) {
+            old_handle.abort();
         }
-
-        subs.insert((addr, channel_id));
-        drop(subs);
 
         println!("{} subscribed to channel {}", addr, channel_id);
 
         let mut rx = channels[channel_id].subscribe();
         let socket_clone = socket.clone();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             while let Ok(msg) = rx.recv().await {
                 let formatted = format!("[{}] {}", channel_id, msg);
 
                 let _ = socket_clone.send_to(formatted.as_bytes(), addr).await;
             }
         });
+        subs.insert(addr, handle);
+        drop(subs);
     }
 }
