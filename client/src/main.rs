@@ -33,6 +33,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut lines = stdin.lines();
 
     while let Some(line) = lines.next_line().await? {
+        if line == "d" {
+            return Ok(());
+        }
         socket.send(line.as_bytes()).await?;
     }
 
