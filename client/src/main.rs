@@ -36,6 +36,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         if line == "d" {
             return Ok(());
         }
+        let number: Result<i32, _> = line.parse();
+        match number {
+            Ok(int_value) => {
+                //socket.send(&.to_be_bytes()).await?;
+            }
+            Err(e) => {
+                eprintln!("Please enter a valid channel");
+                continue;
+            }
+        }
         socket.send(line.as_bytes()).await?;
     }
 

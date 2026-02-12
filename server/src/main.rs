@@ -52,6 +52,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Ok(id) => id,
             Err(_) => {
                 println!("Invalid channel from {}", addr);
+                println!("Received: {}", &msg);
                 continue;
             }
         };
