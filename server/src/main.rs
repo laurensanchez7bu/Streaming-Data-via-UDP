@@ -8,31 +8,79 @@ use tokio::sync::{Mutex, broadcast};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::{Arc, };
+use std::time::Duration;
 
-type Channels = Arc<Mutex<HashMap<String, HashSet<SocketAddr>>>>;
+const NUM_CHANNELS: usize = 12;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // Allow passing an address to listen on as the first argument of this
-    // program, but otherwise we'll just set up our TCP listener on
-    // 127.0.0.1:8080 for connections.
-    let addr = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "127.0.0.1:8080".to_string());
+    let socket = Arc::new(UdpSocket::bind("127.0.0.1:5000").await?);
+    println!("UDP server listening on 127.0.0.1:5000");
 
-    let socket = UdpSocket::bind("127.0.0.1:5000").await?;
-    println!("UDP socket running on 127.0.0.1:5000");
+    let mut channels = Vec::new();
 
-    let channels: Channels = Arc::new(Mutex::new(HashMap::new()));
+    for _ in 0..NUM_CHANNELS {
+        let (tx, _) = broadcast::channel::<String>(NUM_CHANNELS);
+        channels.push(tx);
+    }
+    let channels = Arc::new(channels);
+
+    let subscriptions = Arc::new(Mutex::new(HashSet::<(SocketAddr, usize)>::new()));
+
+    for channel_id in 0..NUM_CHANNELS {
+        let tx = channels[channel_id].clone();
+
+        tokio::spawn(async move {
+            let mut counter = 0;
+
+            loop {
+                let msg = format!("data {} from channel {}", counter, channel_id);
+                let _ = tx.send(msg);
+                counter += 1;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        });
+    }
+
     let mut buf = [0u8; 1024];
 
+    loop {
+        let (len, addr) = socket.recv_from(&mut buf).await?;
+        let msg = String::from_utf8(buf[..len].to_vec())?;
 
-    let listener = TcpListener::bind(&addr).await?;
-    let addr = listener.local_addr()?;
+        let channel_id: usize = match msg.trim().parse() {
+            Ok(id) => id,
+            Err(_) => {
+                println!("Invalid channel from {}", addr);
+                continue;
+            }
+        };
 
-    // You can change anything in this file to suit your needs. This is just a starting point
+        if channel_id >= NUM_CHANNELS {
+            println!("Channel {} too large", channel_id);
+            continue;
+        }
 
-    println!("Listening on: {}", addr);
+        let mut subs = subscriptions.lock().await;
 
-    loop {}
+        if subs.contains(&(addr, channel_id)) {
+            continue;
+        }
+
+        subs.insert((addr, channel_id));
+        drop(subs);
+
+        println!("{} subscribed to channel {}", addr, channel_id);
+
+        let mut rx = channels[channel_id].subscribe();
+        let socket_clone = socket.clone();
+
+        tokio::spawn(async move {
+            while let Ok(msg) = rx.recv().await {
+                let formatted = format!("[{}] {}", channel_id, msg);
+
+                let _ = socket_clone.send_to(formatted.as_bytes(), addr).await;
+            }
+        });
+    }
 }
