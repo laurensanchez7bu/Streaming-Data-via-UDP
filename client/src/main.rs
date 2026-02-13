@@ -24,8 +24,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         loop {
             let len = recv_socket.recv(&mut buf).await.unwrap();
-            let msg = String::from_utf8_lossy(&buf[..len]);
-            println!("Received: {}", msg);
+            let clip_state = buf[0];
+            let data_size = buf[1] as usize;
+            let text = String::from_utf8_lossy(&buf[2..2+data_size]);
+
+            if clip_state == 1 {
+                println!("[NEW CLIP]");
+            }
+            println!("Received: ClipState={}, Size={}, Text={}",
+                     clip_state, data_size, text);
+
         }
     });
 

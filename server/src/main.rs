@@ -1,7 +1,7 @@
 use std::error::Error;
-use std::io::{BufRead, Seek};
+use std::io::{BufRead, Seek, Write};
 use std::{env, thread};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt};
 use tokio::net::TcpListener;
 use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, broadcast};
@@ -13,6 +13,7 @@ use serde::{Deserialize};
 
 const NUM_CHANNELS: usize = 12;
 
+// A clip is an entire recipe
 #[derive(Deserialize)]
 struct Clip {
     duration: f64,
@@ -21,6 +22,8 @@ struct Clip {
     annotations: Vec<Annotation>,
     video_url: String,
 }
+
+// Annotation is the step in the recipe that you are in
 #[derive(Deserialize)]
 struct Annotation {
     segment: [u32; 2],
@@ -79,7 +82,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // 127.0.0.1:8080 for connections.
 
     // Load all recipes into vector
-    let recipes = load_all_recipes("youcookii_annotations_trainval.jsonl")?;
+    let recipes = Arc::new(load_all_recipes("youcookii_annotations_trainval.jsonl")?);
     debug_load_recipes();
 
     let addr = env::args()
@@ -89,7 +92,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut channels = Vec::new();
 
     for _ in 0..NUM_CHANNELS {
-        let (tx, _) = broadcast::channel::<String>(NUM_CHANNELS);
+        let (tx, _) = broadcast::channel::<Vec::<u8>>(NUM_CHANNELS);
         channels.push(tx);
     }
     let channels = Arc::new(channels);
@@ -97,16 +100,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let subscriptions = Arc::new(Mutex::new(HashMap::<SocketAddr, tokio::task::JoinHandle<()>>::new()));
 
     for channel_id in 0..NUM_CHANNELS {
+        let recipes = recipes.clone();
         let tx = channels[channel_id].clone();
 
         tokio::spawn(async move {
-            let mut counter = 0;
-
             loop {
-                let msg = format!("data {} from channel {}", counter, channel_id);
-                let _ = tx.send(msg);
-                counter += 1;
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                let recipe = &recipes[rand::random::<usize>() % recipes.len()];
+
+                for (idx, annotation) in recipe.annotations.iter().enumerate() {
+                    let caption_bytes = annotation.sentence.as_bytes();
+
+                    // Check if annotiation is first in the clip
+
+                    let is_first = idx == 0;
+
+                    let mut packet = Vec::new();
+                    packet.push(if is_first { 1u8 } else { 0u8 });  // ClipState
+                    packet.push(caption_bytes.len() as u8);  // DataSize
+                    packet.extend_from_slice(caption_bytes);
+
+                    let _ = tx.send(packet);
+
+                    let duration = annotation.segment[1] - annotation.segment[0];
+                    tokio::time::sleep(Duration::from_secs(duration as u64)).await;
+                }
             }
         });
     }
@@ -144,9 +161,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         let handle = tokio::spawn(async move {
             while let Ok(msg) = rx.recv().await {
-                let formatted = format!("[{}] {}", channel_id, msg);
-
-                let _ = socket_clone.send_to(formatted.as_bytes(), addr).await;
+                let _ = socket_clone.send_to(&msg, addr).await;
             }
         });
         subs.insert(addr, handle);
