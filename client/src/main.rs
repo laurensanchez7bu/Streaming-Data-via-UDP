@@ -12,8 +12,12 @@ use std::net::SocketAddr;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // Collect address from Command Line args
+    let args: Vec<String> = env::args().collect();
+    dbg!(&args);
+    let addr = args.get(1).cloned().unwrap_or_else(|| "127.0.0.1:8080".to_string());
     let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
-    socket.connect("127.0.0.1:5000").await?;
+    socket.connect(&addr).await?;
 
     println!("Client started on {}", socket.local_addr()?);
 
@@ -31,8 +35,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             if clip_state == 1 {
                 println!("[NEW CLIP]");
             }
-            println!("Received: ClipState={}, Size={}, Text={}",
-                     clip_state, data_size, text);
+            println!("Received from {}: {}",
+                     &addr, text);
 
         }
     });
@@ -47,14 +51,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let number: Result<i32, _> = line.parse();
         match number {
             Ok(int_value) => {
-                //socket.send(&.to_be_bytes()).await?;
+                if int_value < 12 {
+                    socket.send(line.as_bytes()).await?;
+                }
             }
             Err(e) => {
                 eprintln!("Please enter a valid channel");
                 continue;
             }
         }
-        socket.send(line.as_bytes()).await?;
+
+
     }
 
     Ok(())

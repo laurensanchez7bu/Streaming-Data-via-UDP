@@ -75,8 +75,15 @@ fn debug_load_recipes() {
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let socket = Arc::new(UdpSocket::bind("127.0.0.1:5000").await?);
-    println!("UDP server listening on 127.0.0.1:5000");
+
+    // Collect address from command line args
+    let args: Vec<String> = env::args().collect();
+    dbg!(&args);
+
+    let addr = args.get(1).cloned().unwrap_or_else(|| "127.0.0.1:8080".to_string());
+
+    let socket = Arc::new(UdpSocket::bind(&addr).await?);
+    println!("UDP server listening on {}", &addr);
     // Allow passing an address to listen on as the first argument of this
     // program, but otherwise we'll just set up our TCP listener on
     // 127.0.0.1:8080 for connections.
@@ -84,10 +91,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Load all recipes into vector
     let recipes = Arc::new(load_all_recipes("youcookii_annotations_trainval.jsonl")?);
     debug_load_recipes();
-
-    let addr = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "127.0.0.1:8080".to_string());
 
     let mut channels = Vec::new();
 
@@ -122,7 +125,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let _ = tx.send(packet);
 
                     let duration = annotation.segment[1] - annotation.segment[0];
-                    tokio::time::sleep(Duration::from_secs(duration as u64)).await;
+                    tokio::time::sleep(Duration::from_secs((duration/4) as u64)).await;
                 }
             }
         });
