@@ -92,8 +92,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let recipes = Arc::new(load_all_recipes("youcookii_annotations_trainval.jsonl")?);
     debug_load_recipes();
 
-    let mut channels = Vec::new();
+    let mut channels = Vec::new(); // Vector to maintain channels
 
+    // Add channels to vector
     for _ in 0..NUM_CHANNELS {
         let (tx, _) = broadcast::channel::<Vec::<u8>>(NUM_CHANNELS);
         channels.push(tx);
@@ -102,10 +103,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let subscriptions = Arc::new(Mutex::new(HashMap::<SocketAddr, tokio::task::JoinHandle<()>>::new()));
 
+    // Loop to start UDP broadcasting for each channel
     for channel_id in 0..NUM_CHANNELS {
         let recipes = recipes.clone();
         let tx = channels[channel_id].clone();
 
+        // Spawn async process
         tokio::spawn(async move {
             loop {
                 let recipe = &recipes[rand::random::<usize>() % recipes.len()];
@@ -117,13 +120,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                     let is_first = idx == 0;
 
+                    // Build packet
                     let mut packet = Vec::new();
                     packet.push(if is_first { 1u8 } else { 0u8 });  // ClipState
                     packet.push(caption_bytes.len() as u8);  // DataSize
                     packet.extend_from_slice(caption_bytes);
 
+                    // Send packet
                     let _ = tx.send(packet);
 
+                    // Wait until time for next sentence
                     let duration = annotation.segment[1] - annotation.segment[0];
                     tokio::time::sleep(Duration::from_secs((duration/4) as u64)).await;
                 }
@@ -131,12 +137,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
         });
     }
 
+    // Buffer to read from Client
     let mut buf = [0u8; 1024];
 
+    // Loop to read from client
+    // TODO: this should read TCP messages, not UDP
     loop {
         let (len, addr) = socket.recv_from(&mut buf).await?;
         let msg = String::from_utf8(buf[..len].to_vec())?;
+        let mut subs = subscriptions.lock().await;
 
+        // Unsubscribe client if input d
+        if msg == "d" {
+            let old_handle  = subs.remove(&addr);
+            old_handle.unwrap().abort();
+            continue;
+        }
+
+        // Otherwise client input number, shouldn't ever fail because client should only input integers at this point
         let channel_id: usize = match msg.trim().parse() {
             Ok(id) => id,
             Err(_) => {
@@ -146,27 +164,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         };
 
+        // TODO: Send TCP message, don't just print invalid channel
         if channel_id >= NUM_CHANNELS {
             println!("Channel {} too large", channel_id);
+            drop(subs);
             continue;
         }
 
-        let mut subs = subscriptions.lock().await;
-
+        // Remove subscription to old channel
         if let Some(old_handle) = subs.remove(&addr) {
             old_handle.abort();
         }
 
         println!("{} subscribed to channel {}", addr, channel_id);
 
+        // Subscribe client to channel
         let mut rx = channels[channel_id].subscribe();
         let socket_clone = socket.clone();
 
+        // Start a handle for sending messages to client
         let handle = tokio::spawn(async move {
             while let Ok(msg) = rx.recv().await {
                 let _ = socket_clone.send_to(&msg, addr).await;
             }
         });
+        
+        // Associate client addr and handle
         subs.insert(addr, handle);
         drop(subs);
     }
