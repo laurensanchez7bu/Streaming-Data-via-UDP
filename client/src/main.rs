@@ -1,6 +1,6 @@
 use tokio::io;
-use tokio::net::UdpSocket;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::net::{TcpStream, UdpSocket};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use std::sync::Arc;
 
 
@@ -17,20 +17,52 @@ async fn main() -> Result<(), Box<dyn Error>> {
     dbg!(&args);
     let addr = args.get(1).cloned().unwrap_or_else(|| "127.0.0.1:8080".to_string());
     let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
+    let local_port = socket.local_addr()?.port();
     socket.connect(&addr).await?;
 
     println!("Client started on {}", socket.local_addr()?);
 
-    let recv_socket = socket.clone();
+    // Connect to server over TCP
+    let mut tcp_stream = TcpStream::connect(&addr).await?;
+    println!("Connected to server via TCP");
 
+    // Send Hello message
+    let mut hello_msg = Vec::new();
+    hello_msg.push(33u8); // Hello command
+    hello_msg.extend_from_slice(&local_port.to_be_bytes());
+    tcp_stream.write_all(&hello_msg).await?;
+    println!("Sent Hello message with UDP port {}", local_port);
+
+    // Read ChannelList from server
+    let mut buf = [0u8; 3];
+    tcp_stream.read_exact(&mut buf).await?;
+    if buf[0] != 0 {
+        panic!("Expected ChannelList, got command {}", buf[0]);
+    }
+
+    let num_channels = u16::from_be_bytes([buf[1], buf[2]]);
+    println!(
+        "You've connected to the BearTV Closed Captioning Service. There are {} TV stations available.",
+        num_channels
+    );
+
+    let recv_socket = socket.clone();
+    let addr_clone = addr.clone();
+
+    // Spawn task to receive captions over UDP
     tokio::spawn(async move {
         let mut buf = [0u8; 1024]; // Buffer for UDP data
 
         loop {
             // Retrieve UDP data
-            let len = recv_socket.recv(&mut buf).await.unwrap();
+            let len = match recv_socket.recv(&mut buf).await {
+                Ok(n) => n,
+                Err(_) => continue,
+            };
+            if len < 2 { continue; } // Skip invalid packets
             let clip_state = buf[0];
             let data_size = buf[1] as usize;
+            if len < 2 + data_size { continue; }
             let text = String::from_utf8_lossy(&buf[2..2+data_size]);
 
             // Indicate if new clip
@@ -38,9 +70,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 println!("[NEW CLIP]");
             }
             // Print sentence
-            println!("Received from {}: {}",
-                     &addr, text);
-
+            println!("Received from {}: {}", addr_clone, text);
         }
     });
 
@@ -51,34 +81,44 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // TODO: bits 0-8 - command; bits 8-23 - station number
     // TODO: Change UDP -> TCP messages
     while let Some(line) = lines.next_line().await? {
-        // Quit if input q
-        if line == "q" {
-            return Ok(());
-        }
-        // Unsubscribe if input d
-        // This is the only character that should be sent to server -
-        // All other characters are invalid and handles in the next statement
-        if line == "d" {
-            socket.send(line.as_bytes()).await?;
-            continue;
-        }
-        // Attempt to parse input
-        let number: Result<i32, _> = line.parse();
-        match number {
-            Ok(int_value) => {
-                // Send to server
-                if int_value < 12 {
-                    socket.send(line.as_bytes()).await?;
+        // Get rid of whitespace / newline
+        let input = line.trim();
+
+        match input {
+            "q" => {
+                println!("Exiting client");
+                break;
+            }
+            "d" => {
+                // Send disconnect command over TCP
+                tcp_stream.write_all(b"d").await?;
+                println!("Disconnected from current channel. Enter new channel number to subscribe.");
+            }
+            _=> {
+                match input.parse::<u16>() {
+                    Ok(channel_id) if channel_id < num_channels => {
+                        // Send choose channel message
+                        let mut choose_msg = Vec::new();
+                        choose_msg.push(34u8);
+                        choose_msg.extend_from_slice(&channel_id.to_be_bytes());
+                        tcp_stream.write_all(&choose_msg).await?;
+                        println!("Requested subscription to channel {}", channel_id);
+
+                        // Read server response
+                        let mut resp = [0u8; 1];
+                        tcp_stream.read_exact(&mut resp).await?;
+                        match resp[0] {
+                            1 => println!("Server responded: Invalid channel"),
+                            2 => println!("Server responded: Connected to channel {}", channel_id),
+                            _ => println!("Unexpected response from server: {}", resp[0]),
+                        }
+                    }
+                    _=> {
+                        println!("Invalid input. Enter a channel number (0-{}) or 'q' to quit", num_channels - 1);
+                    }
                 }
             }
-            // Invalid input handling
-            Err(e) => {
-                eprintln!("Please enter a valid channel");
-                continue;
-            }
         }
-
-
     }
 
     Ok(())
