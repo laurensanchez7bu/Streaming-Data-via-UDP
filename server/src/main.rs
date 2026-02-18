@@ -206,6 +206,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
+//tcp listener, generates channel list as response
 async fn run_tcp_listener(addr: String, num_channels: u16) -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(&addr).await?;
     println!("TCP Listener running on {}", addr);
