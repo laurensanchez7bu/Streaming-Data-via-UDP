@@ -10,8 +10,12 @@ use std::net::SocketAddr;
 use std::sync::{Arc, };
 use std::time::Duration;
 use serde::{Deserialize};
+use tokio::io::{AsyncWriteExt};
+use tokio::net::TcpStream;
 
 const NUM_CHANNELS: usize = 12;
+const CMD_HELLO: u8 = 33;
+const CMD_CHANNEL_LIST: u8 = 0;
 
 // A clip is an entire recipe
 #[derive(Deserialize)]
@@ -81,6 +85,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     dbg!(&args);
 
     let addr = args.get(1).cloned().unwrap_or_else(|| "127.0.0.1:8080".to_string());
+
+    let tcp_addr: String = args.get(1).cloned().unwrap_or_else(|| "127.0.0.1:8080".to_string());
+    tokio::spawn(async move {
+        if let Err(e) = run_tcp_listener(tcp_addr, NUM_CHANNELS as u16).await {
+            eprintln!("TCP listener failed: {}", e);
+        }
+    });
 
     let socket = Arc::new(UdpSocket::bind(&addr).await?);
     println!("UDP server listening on {}", &addr);
@@ -192,5 +203,37 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Associate client addr and handle
         subs.insert(addr, handle);
         drop(subs);
+    }
+}
+
+//tcp listener, generates channel list as response
+async fn run_tcp_listener(addr: String, num_channels: u16) -> Result<(), Box<dyn Error>> {
+    let listener = TcpListener::bind(&addr).await?;
+    println!("TCP Listener running on {}", addr);
+
+    loop{
+        let (mut stream, peer) = listener.accept().await?;
+        println!("TCP client connected: {}", peer);
+
+        let mut buf = [0u8; 3];
+        stream.read_exact(&mut buf).await?;
+
+        let cmd = buf[0];
+        let udp_port = u16::from_be_bytes([buf[1], buf[2]]);
+
+        println!("Received cmd: {}, udp_port={}", cmd, udp_port);
+
+        //if not Hello, ignore
+        if cmd != CMD_HELLO {
+            continue;
+        }
+
+        // sned channel list
+        let mut resp = [0u8; 3];
+        resp[0] = CMD_CHANNEL_LIST;
+        resp[1..3].copy_from_slice(&cmd.to_be_bytes());
+
+        stream.write_all(&resp).await?;
+        println!("Sent ChannelList with {} channels", num_channels);
     }
 }
