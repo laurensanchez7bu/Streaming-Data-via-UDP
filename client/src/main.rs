@@ -10,6 +10,12 @@ use std::env;
 use std::error::Error;
 use std::net::SocketAddr;
 
+const CMD_HELLO: u8 = 33;
+const CMD_CHOOSE_CHANNEL: u8 = 34;
+const CMD_CONNECTED: u8 = 2;
+const INVALID_CHANNEL: u8 = 1;
+const CMD_CHANNEL_LIST: u8 = 0;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Collect address from Command Line args
@@ -18,7 +24,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let addr = args.get(1).cloned().unwrap_or_else(|| "127.0.0.1:8080".to_string());
     let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
     let local_port = socket.local_addr()?.port();
-    socket.connect(&addr).await?;
 
     println!("Client started on {}", socket.local_addr()?);
 
@@ -28,7 +33,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Send Hello message
     let mut hello_msg = Vec::new();
-    hello_msg.push(33u8); // Hello command
+    hello_msg.push(CMD_HELLO); // Hello command
     hello_msg.extend_from_slice(&local_port.to_be_bytes());
     tcp_stream.write_all(&hello_msg).await?;
     println!("Sent Hello message with UDP port {}", local_port);
@@ -47,7 +52,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
 
     let recv_socket = socket.clone();
-    let addr_clone = addr.clone();
 
     // Spawn task to receive captions over UDP
     tokio::spawn(async move {
@@ -55,7 +59,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         loop {
             // Retrieve UDP data
-            let len = match recv_socket.recv(&mut buf).await {
+            let (len, src_addr) = match recv_socket.recv_from(&mut buf).await {
                 Ok(n) => n,
                 Err(_) => continue,
             };
@@ -70,7 +74,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 println!("[NEW CLIP]");
             }
             // Print sentence
-            println!("Received from {}: {}", addr_clone, text);
+            println!("Received from {}: {}", src_addr, text);
         }
     });
 
@@ -90,16 +94,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 break;
             }
             "d" => {
-                // Send disconnect command over TCP
-                tcp_stream.write_all(b"d").await?;
-                println!("Disconnected from current channel. Enter new channel number to subscribe.");
+                tcp_stream = TcpStream::connect(&addr).await?;
+
+                let mut hello_msg = vec![CMD_HELLO];
+                hello_msg.extend_from_slice(&local_port.to_be_bytes());
+                tcp_stream.write_all(&hello_msg).await?;
+
+                let mut buf = [0u8; 3];
+                tcp_stream.read_exact(&mut buf).await?;
+                println!("Reconnected. Enter a channel number to subscribe.");
             }
             _=> {
                 match input.parse::<u16>() {
                     Ok(channel_id) if channel_id < num_channels => {
                         // Send choose channel message
                         let mut choose_msg = Vec::new();
-                        choose_msg.push(34u8);
+                        choose_msg.push(CMD_CHOOSE_CHANNEL);
                         choose_msg.extend_from_slice(&channel_id.to_be_bytes());
                         tcp_stream.write_all(&choose_msg).await?;
                         println!("Requested subscription to channel {}", channel_id);
