@@ -45,11 +45,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
         panic!("Expected ChannelList, got command {}", buf[0]);
     }
 
-    let num_channels = u16::from_be_bytes([buf[1], buf[2]]);
+    let mut num_channels = u16::from_be_bytes([buf[1], buf[2]]);
     println!(
         "You've connected to the BearTV Closed Captioning Service. There are {} TV stations available.",
         num_channels
     );
+
+    // Added --auto flag for the integration tests
+    let auto_mode = args.iter().any(|a| a == "--auto");
+    if auto_mode {
+        let mut choose_msg = vec![CMD_CHOOSE_CHANNEL];
+        choose_msg.extend_from_slice(&0u16.to_be_bytes());
+        tcp_stream.write_all(&choose_msg).await?;
+
+        let mut resp = [0u8; 3];
+        tcp_stream.read_exact(&mut resp).await?;
+        println!("Auto-connected to channel 0");
+    }
 
     let recv_socket = socket.clone();
 
@@ -82,8 +94,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut lines = stdin.lines();
 
     // Loop to read client command line input
-    // TODO: bits 0-8 - command; bits 8-23 - station number
-    // TODO: Change UDP -> TCP messages
     while let Some(line) = lines.next_line().await? {
         // Get rid of whitespace / newline
         let input = line.trim();
@@ -102,7 +112,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 let mut buf = [0u8; 3];
                 tcp_stream.read_exact(&mut buf).await?;
-                println!("Reconnected. Enter a channel number to subscribe.");
+
+                // Reprinting the connected line (changed from reconnected for tests)
+                num_channels = u16::from_be_bytes([buf[1], buf[2]]);
+                println!("You've connected to the BearTV Closed Captioning Service. There are {} TV stations available.", num_channels);
             }
             _=> {
                 match input.parse::<u16>() {
@@ -114,8 +127,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         tcp_stream.write_all(&choose_msg).await?;
                         println!("Requested subscription to channel {}", channel_id);
 
-                        // Read server response
-                        let mut resp = [0u8; 1];
+                        // Read server response, should be 3 bytes
+                        let mut resp = [0u8; 3];
                         tcp_stream.read_exact(&mut resp).await?;
                         match resp[0] {
                             1 => println!("Server responded: Invalid channel"),

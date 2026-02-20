@@ -54,32 +54,6 @@ fn load_all_recipes(path: &str) -> Result<Vec<Clip>, Box<dyn Error>> {
     Ok(recipes)
 }
 
-// TODO: This function is just for debugging during broadcasting, delete later
-fn debug_load_recipes() {
-    match load_all_recipes("youcookii_annotations_trainval.jsonl") {
-        Ok(recipes) => {
-            println!("Loaded {} recipes", recipes.len());
-
-            if let Some(first) = recipes.first() {
-                println!("\nFirst recipe:");
-                println!("  Duration: {}", first.duration);
-                println!("  Type: {}", first.recipe_type);
-                println!("  Subset: {}", first.subset);
-                println!("  Annotations: {}", first.annotations.len());
-
-                if let Some(ann) = first.annotations.first() {
-                    println!("\n  First annotation:");
-                    println!("    Segment: {:?}", ann.segment);
-                    println!("    ID: {}", ann.id);
-                    println!("    Sentence: {}", ann.sentence);
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("Failed to load recipes: {}", e);
-        }
-    }
-}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
 
@@ -98,7 +72,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Load all recipes into vector
     let recipes = Arc::new(load_all_recipes("youcookii_annotations_trainval.jsonl")?);
-    debug_load_recipes();
 
     let mut channels = Vec::new(); // Vector to maintain channels
 
@@ -138,8 +111,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let _ = tx.send(packet);
 
                     // Wait until time for next sentence
-                    let duration = annotation.segment[1] - annotation.segment[0];
-                    tokio::time::sleep(Duration::from_secs((duration/4) as u64)).await;
+                    // Turning into ms to avoid div by 4 equaling 0
+                    let duration_ms = (annotation.segment[1] - annotation.segment[0]) as u64 * 250;
+                    tokio::time::sleep(Duration::from_millis(duration_ms)).await;
                 }
             }
         });
@@ -225,7 +199,12 @@ async fn run_tcp_listener(addr: String,
                 subs.insert(client_udp_addr, handle);
                 drop(subs);
 
-                stream.write_all(&[CMD_CONNECTED]).await.unwrap();
+                // Send Connected response with channel number
+                // (3 bytes: command + u16 channel id)
+                let mut resp = [0u8; 3];
+                resp[0] = CMD_CONNECTED;
+                resp[1..3].copy_from_slice(&channel_id.to_be_bytes());
+                stream.write_all(&resp).await.unwrap();
             }
         });
     }
