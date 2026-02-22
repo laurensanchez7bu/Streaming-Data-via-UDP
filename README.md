@@ -190,6 +190,13 @@ Prior students of this course have added the following feedback, which may aid y
   packet? Under your proposed scheme, what is the maximum character length of a `sentence`?
 - If one of the UDP messages is lost in transit, what happens? How will the client receive that data, or be made aware that it was lost?
 
+## Answers
+ - In UDP bind() associates a socket with a local address and port telling it which IP and port to listen on. Connect() sets a default remote address for the socket allowing it to only accept packets from that address.
+ - Calling bind(0.0.0.0:0) lets the socket listen on all local interfaces and allows the OS to automatically assign an available port.
+ - The maximum size of our UDP payload is 257 bytes.
+ - A way that we could communicate longer sentences within a single UDP packet would be to change the DataSize field from a u8 to a u16 which would allow for a longer length of caption. Using u16 the maximum character length of a sentence would be 65,535 characters.
+ - If one of the UDP messages is lost in transit the client will never receive that caption. UDP does not have any notification or retransmission so the client will no receive the data or be made aware that it was lost.
+
 ## What to submit
 
 - Push your working code to the main branch of your team's GitHub Repository before the deadline
