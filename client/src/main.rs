@@ -55,6 +55,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let mut resp = [0u8; 3];
         tcp_stream.read_exact(&mut resp).await?;
         println!("Auto-connected to channel 0");
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+        return Ok(());
     }
 
     let recv_socket = socket.clone();
