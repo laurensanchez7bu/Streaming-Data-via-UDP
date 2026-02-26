@@ -1,14 +1,8 @@
-use tokio::io;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use std::sync::Arc;
-
-
-use tokio_util::codec::{BytesCodec, FramedRead, FramedWrite, LinesCodec};
-
 use std::env;
 use std::error::Error;
-use std::net::SocketAddr;
 
 const CMD_HELLO: u8 = 33;
 const CMD_CHOOSE_CHANNEL: u8 = 34;
@@ -41,7 +35,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Read ChannelList from server
     let mut buf = [0u8; 3];
     tcp_stream.read_exact(&mut buf).await?;
-    if buf[0] != 0 {
+    if buf[0] != CMD_CHANNEL_LIST {
         panic!("Expected ChannelList, got command {}", buf[0]);
     }
 
@@ -131,8 +125,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         let mut resp = [0u8; 3];
                         tcp_stream.read_exact(&mut resp).await?;
                         match resp[0] {
-                            1 => println!("Server responded: Invalid channel"),
-                            2 => println!("Server responded: Connected to channel {}", channel_id),
+                            INVALID_CHANNEL => println!("Server responded: Invalid channel"),
+                            CMD_CONNECTED => println!("Server responded: Connected to channel {}", channel_id),
                             _ => println!("Unexpected response from server: {}", resp[0]),
                         }
                     }
