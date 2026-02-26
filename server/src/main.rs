@@ -113,10 +113,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let _ = tx.send(packet);
 
                     // Sleep until the next annotation's start time relative to clip start.
-                    // Multiply segment[0] by 250ms to achieve 4x speed scaling.
+                    // Multiply segment[0] by 100ms to achieve 10x speed scaling.
                     // Subtracting elapsed ensures we account for time spent sending the packet.
                     if let Some(next) = recipe.annotations.get(idx + 1) {
-                        let next_start_ms = next.segment[0] as u64 * 250;
+                        let next_start_ms = next.segment[0] as u64 * 100;
                         let elapsed_ms = clip_start.elapsed().as_millis() as u64;
                         if next_start_ms > elapsed_ms {
                             tokio::time::sleep(Duration::from_millis(next_start_ms - elapsed_ms)).await;
