@@ -1,16 +1,16 @@
 use std::error::Error;
-use std::io::{BufRead, Seek, Write};
-use std::{env, thread};
-use tokio::io::{AsyncReadExt};
+use std::io::BufRead;
+use std::env;
+use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, broadcast};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, };
+use std::sync::Arc;
 use std::time::Duration;
-use serde::{Deserialize};
-use tokio::io::{AsyncWriteExt};
+use serde::Deserialize;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
 const NUM_CHANNELS: usize = 12;
@@ -21,6 +21,7 @@ const INVALID_CHANNEL: u8 = 1;
 const CMD_CHANNEL_LIST: u8 = 0;
 
 // A clip is an entire recipe
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct Clip {
     duration: f64,
@@ -30,7 +31,8 @@ struct Clip {
     video_url: String,
 }
 
-// Annotation is the step in the recipe that you are in
+// Annotation is the step of the recipe that you are in
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct Annotation {
     segment: [u32; 2],
@@ -46,7 +48,7 @@ fn load_all_recipes(path: &str) -> Result<Vec<Clip>, Box<dyn Error>> {
     let mut recipes = Vec::new();
     for line in reader.lines() {
         let line = line?;
-        // Serde imported to read and parse json
+        // Serde imported to read and parse JSON
         let recipe: Clip = serde_json::from_str(&line)?;
         recipes.push(recipe);
     }
@@ -77,7 +79,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Add channels to vector
     for _ in 0..NUM_CHANNELS {
-        let (tx, _) = broadcast::channel::<Vec::<u8>>(NUM_CHANNELS);
+        let (tx, _) = broadcast::channel::<Vec<u8>>(NUM_CHANNELS);
         channels.push(tx);
     }
 
@@ -93,12 +95,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         tokio::spawn(async move {
             loop {
                 let recipe = &recipes[rand::random::<usize>() % recipes.len()];
+                let clip_start = tokio::time::Instant::now();
 
                 for (idx, annotation) in recipe.annotations.iter().enumerate() {
                     let caption_bytes = annotation.sentence.as_bytes();
 
-                    // Check if annotiation is first in the clip
-
+                    // Check if annotation is first in the clip
                     let is_first = idx == 0;
 
                     // Build packet
@@ -110,101 +112,122 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     // Send packet
                     let _ = tx.send(packet);
 
-                    // Wait until time for next sentence
-                    // Turning into ms to avoid div by 4 equaling 0
-                    let duration_ms = (annotation.segment[1] - annotation.segment[0]) as u64 * 250;
-                    tokio::time::sleep(Duration::from_millis(duration_ms)).await;
+                    // Sleep until the next annotation's start time relative to clip start.
+                    // Multiply segment[0] by 250ms to achieve 4x speed scaling.
+                    // Subtracting elapsed ensures we account for time spent sending the packet.
+                    if let Some(next) = recipe.annotations.get(idx + 1) {
+                        let next_start_ms = next.segment[0] as u64 * 250;
+                        let elapsed_ms = clip_start.elapsed().as_millis() as u64;
+                        if next_start_ms > elapsed_ms {
+                            tokio::time::sleep(Duration::from_millis(next_start_ms - elapsed_ms)).await;
+                        }
+                    }
                 }
             }
         });
     }
 
-    run_tcp_listener(addr, NUM_CHANNELS as u16, channels, socket, subscriptions).await?;
+    run_tcp_listener(addr, channels, socket, subscriptions).await?;
 
     Ok(())
 }
 
-//tcp listener, generates channel list as response
+// Handles a single client connection. Returns a Result so errors propagate
+// via ? rather than panicking with unwrap()
+async fn handle_client(
+    mut stream: TcpStream,
+    peer: SocketAddr,
+    channels: Arc<Vec<broadcast::Sender<Vec<u8>>>>,
+    socket: Arc<UdpSocket>,
+    subscriptions: Arc<Mutex<HashMap<SocketAddr, tokio::task::JoinHandle<()>>>>,
+) -> Result<(), Box<dyn Error>> {
+    let mut buf = [0u8; 3];
+    stream.read_exact(&mut buf).await?;
+
+    let cmd = buf[0];
+    let udp_port = u16::from_be_bytes([buf[1], buf[2]]);
+    println!("Received cmd: {}, udp_port={}", cmd, udp_port);
+
+    // Hello should be the first message from client
+    if cmd != CMD_HELLO { return Ok(()); }
+
+    // Build client UDP address
+    let client_udp_addr = SocketAddr::new(peer.ip(), udp_port);
+
+    // Send Channel list
+    let mut resp = [0u8; 3];
+    resp[0] = CMD_CHANNEL_LIST;
+    resp[1..3].copy_from_slice(&(NUM_CHANNELS as u16).to_be_bytes());
+    stream.write_all(&resp).await?;
+    println!("Sent ChannelList with {} channels", NUM_CHANNELS);
+
+    loop {
+        let mut buf = [0u8; 3];
+        // If client disconnects, unsubscribe them and exit cleanly
+        if stream.read_exact(&mut buf).await.is_err() {
+            subscriptions.lock().await.remove(&client_udp_addr).map(|h| h.abort());
+            return Ok(());
+        }
+
+        let cmd = buf[0];
+        let channel_id = u16::from_be_bytes([buf[1], buf[2]]);
+
+        if cmd != CMD_CHOOSE_CHANNEL { continue; }
+
+        // Check if client gave a number >= total channels
+        if channel_id >= NUM_CHANNELS as u16 {
+            stream.write_all(&[INVALID_CHANNEL]).await?;
+            continue;
+        }
+
+        let mut subs = subscriptions.lock().await;
+        if let Some(old) = subs.remove(&client_udp_addr) {
+            old.abort();
+        }
+
+        let mut rx = channels[channel_id as usize].subscribe();
+        let socket_clone = socket.clone();
+
+        // Start a handle for sending messages to client
+        let handle = tokio::spawn(async move {
+            while let Ok(msg) = rx.recv().await {
+                let _ = socket_clone.send_to(&msg, client_udp_addr).await;
+            }
+        });
+
+        // Associate client addr and handle
+        subs.insert(client_udp_addr, handle);
+        drop(subs);
+
+        // Send Connected response with channel number
+        // (3 bytes: command + u16 channel id)
+        let mut resp = [0u8; 3];
+        resp[0] = CMD_CONNECTED;
+        resp[1..3].copy_from_slice(&channel_id.to_be_bytes());
+        stream.write_all(&resp).await?;
+    }
+}
+
+// TCP listener — accepts incoming connections and spawns a handle_client
+// task for each one, logging any errors without crashing the server
 async fn run_tcp_listener(addr: String,
-                            num_channels: u16,
-                            channels: Arc<Vec<broadcast::Sender<Vec<u8>>>>,
-                            socket: Arc<UdpSocket>,
-                            subscriptions: Arc<Mutex<HashMap<SocketAddr, tokio::task::JoinHandle<()>>>>
+                          channels: Arc<Vec<broadcast::Sender<Vec<u8>>>>,
+                          socket: Arc<UdpSocket>,
+                          subscriptions: Arc<Mutex<HashMap<SocketAddr, tokio::task::JoinHandle<()>>>>
 ) -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(&addr).await?;
     println!("TCP Listener running on {}", addr);
 
-    loop{
-        let (mut stream, peer) = listener.accept().await?;
+    loop {
+        let (stream, peer) = listener.accept().await?;
         let channels = channels.clone();
         let socket = socket.clone();
         let subscriptions = subscriptions.clone();
 
+        // Spawn a task per client; errors are logged rather than panicked
         tokio::spawn(async move {
-            let mut buf = [0u8; 3];
-            stream.read_exact(&mut buf).await.unwrap();
-
-            let cmd = buf[0];
-            let udp_port = u16::from_be_bytes([buf[1], buf[2]]);
-            println!("Received cmd: {}, udp_port={}", cmd, udp_port);
-
-            // Hello should be the first message from client
-            if cmd != CMD_HELLO {return; }
-
-            // Build client UDP address
-            let client_udp_addr = SocketAddr::new(peer.ip(), udp_port);
-
-            // Send Channel list
-            let mut resp = [0u8; 3];
-            resp[0] = CMD_CHANNEL_LIST;
-            resp[1..3].copy_from_slice(&(NUM_CHANNELS as u16).to_be_bytes());
-
-            stream.write_all(&resp).await.unwrap();
-            println!("Sent ChannelList with {} channels", num_channels);
-
-            loop {
-                let mut buf = [0u8; 3];
-                // If client disconnects, unsubscribe them
-                if stream.read_exact(&mut buf).await.is_err() {
-                    subscriptions.lock().await.remove(&client_udp_addr).map(|h| h.abort());
-                    return;
-                }
-
-                let cmd = buf[0];
-                let channel_id = u16::from_be_bytes([buf[1], buf[2]]);
-
-                if cmd != CMD_CHOOSE_CHANNEL { continue; }
-
-                if channel_id >= NUM_CHANNELS as u16 {
-                    stream.write_all(&[INVALID_CHANNEL]).await.unwrap();
-                    continue;
-                }
-
-                let mut subs = subscriptions.lock().await;
-                if let Some(old) = subs.remove(&client_udp_addr) {
-                    old.abort();
-                }
-
-                let mut rx = channels[channel_id as usize].subscribe();
-                let socket_clone = socket.clone();
-
-                // Start a handle for sending messages to client
-                let handle = tokio::spawn(async move {
-                    while let Ok(msg) = rx.recv().await {
-                        let _ = socket_clone.send_to(&msg, client_udp_addr).await;
-                    }
-                });
-
-                // Associate client addr and handle
-                subs.insert(client_udp_addr, handle);
-                drop(subs);
-
-                // Send Connected response with channel number
-                // (3 bytes: command + u16 channel id)
-                let mut resp = [0u8; 3];
-                resp[0] = CMD_CONNECTED;
-                resp[1..3].copy_from_slice(&channel_id.to_be_bytes());
-                stream.write_all(&resp).await.unwrap();
+            if let Err(e) = handle_client(stream, peer, channels, socket, subscriptions).await {
+                eprintln!("Client error from {}: {}", peer, e);
             }
         });
     }
